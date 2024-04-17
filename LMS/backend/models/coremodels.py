@@ -37,7 +37,6 @@ class User(models.Model):
         ('archived', 'Archived')
     ], default='active', null=True)
     customer = models.ForeignKey('Customer', on_delete=models.CASCADE, related_name='users')
-    user_role = models.ForeignKey('Role', on_delete=models.CASCADE, related_name='user_roles')
     created_by = models.ForeignKey('Role', on_delete=models.CASCADE, related_name='created_users')
 
     class Meta:

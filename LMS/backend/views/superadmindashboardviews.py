@@ -2,7 +2,6 @@ from core.custom_mixins import SuperAdminMixin
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from backend.serializers.superadmindashboardserializers import (
     ActiveCourseCountSerializer, 
     ActiveRegistrationCountSerializer, 
@@ -14,17 +13,13 @@ from backend.models.allmodels import (
     CourseRegisterRecord,
 )
 from rest_framework.exceptions import NotFound, ValidationError
-from django.core.exceptions import PermissionDenied
-from django.shortcuts import get_object_or_404, render, redirect
-from django.utils.decorators import method_decorator
-
 
 # =================================================================
 # super admin dashboard
 # =================================================================
 class ActiveRegisteredCustomerCountView(SuperAdminMixin,APIView):
-    """get api
-    for super admin
+    """
+    GET API for super admin to get count active and inactive registrations.
     """
     def get(self, request):
         try:
@@ -47,10 +42,9 @@ class ActiveRegisteredCustomerCountView(SuperAdminMixin,APIView):
 # graph to count registrations per course 
 class CountOfActiveRegistrationPerCoure(SuperAdminMixin,APIView):
     """
-        get request
-        
-        for super admin
-        
+    GET API for super admin to get count active registrations of customers per each courses separately.
+    """
+    """
         get list of active courses from course table
         and for each course count instances from course registration records which are active =true, deleted_at =null
         and pass this data in response for each course send it's calculated count
@@ -66,6 +60,7 @@ class CountOfActiveRegistrationPerCoure(SuperAdminMixin,APIView):
                 return Response({"message": "no active course found"},status=status.HTTP_404_NOT_FOUND)
 
             course_active_registration_counts = []
+            
             for course in active_courses:
                 active_registration_count = CourseRegisterRecord.objects.filter(
                     course=course,
@@ -79,12 +74,16 @@ class CountOfActiveRegistrationPerCoure(SuperAdminMixin,APIView):
                     'course_title': course.title,
                     'active_registration_count': active_registration_count
                 })
+                
             return Response(course_active_registration_counts, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class GraphOfProgressPerCourseView(SuperAdminMixin,APIView):
+    """
+    GET API for super admin to get count of completed, in progress and not-tarted status of courses separately.
+    """
 
     def get(self, request):
         try:
@@ -142,6 +141,7 @@ class CourseCountView(SuperAdminMixin, APIView):
             
             active_course_count = Course.objects.filter(active=True, deleted_at__isnull=True).count()
             inactive_course_count = Course.objects.filter(active=False, deleted_at__isnull=True).count()
+            
             if active_course_count == 0:
                 active_response = {"message": "No active courses were found"}
             else:
@@ -152,6 +152,7 @@ class CourseCountView(SuperAdminMixin, APIView):
             else:
                 inactive_serializer = InActiveCourseCountSerializer({'inactive_course_count': inactive_course_count})
                 inactive_response = inactive_serializer.data
+
             return Response({
                 "active_courses": active_response,
                 "inactive_courses": inactive_response

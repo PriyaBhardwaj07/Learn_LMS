@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from backend.models.allmodels import (
+    Choice,
     Course, 
     CourseStructure, 
     Question, 
@@ -234,3 +235,16 @@ class QuestionListPerQuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = ['id', 'content', 'created_at']
+
+class ChoicesListPerQuestionSerializer(serializers.ModelSerializer):
+    
+    def validate(self, data):
+        # Field Existence and Null Field Handling
+        required_fields = ['id', 'choice', 'correct']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise serializers.ValidationError(f"{field} is required")
+        return data
+    class Meta:
+        model = Choice
+        fields = ['id', 'choice', 'correct']

@@ -140,7 +140,7 @@ class CourseEnrollment(models.Model):
     deleted_at = models.DateTimeField(null=True)
     
     def __str__(self):
-        return self.user.name+"-"+self.course.title
+        return self.user.first_name+"-"+self.course.title
     
     class Meta:
         db_table = 'course_enrollment'
@@ -450,6 +450,9 @@ class Choice(models.Model):
         help_text=_("Is this a correct answer?"),
         verbose_name=_("Correct"),
     )
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now=False, auto_now_add=True, null=True)
+    deleted_at = models.DateTimeField(null=True)
 
     def __str__(self):
         return self.choice
