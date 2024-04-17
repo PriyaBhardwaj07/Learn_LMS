@@ -20,7 +20,6 @@ from backend.models.allmodels import (
     QuizAttemptHistory,
 )
 from backend.serializers.createcourseserializers import (
-    CourseStructureSerializer,
     CreateChoiceSerializer,
     QuizSerializer, 
 )
@@ -37,6 +36,11 @@ from django.views.generic import (
 from backend.forms import (
     QuestionForm,
 )
+from backend.serializers.courseserializers import(
+    CourseStructureSerializer,
+
+)
+
 
 class QuestionView(SuperAdminMixin, APIView):
     """

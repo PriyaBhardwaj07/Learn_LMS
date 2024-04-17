@@ -70,22 +70,3 @@ class ClientMixin:
         print(privileged_resources)
         return client_resources == privileged_resources
     
-
-
-"""
-    class ClientMixin:
-        def has_client_privileges(self, request):
-            # Define client resources that the user should have access to
-            client_resources = {1, 4, 6}  # Example set of client resources
-
-            # Retrieve the user from the request
-            user = request.user
-
-            # Assuming 'role' is a property of the user object
-            user_role = user.role  # Adjust this based on your user model
-
-            # Check if the user's role grants access to all client resources
-            return user_role in client_resources
-        """
-
-

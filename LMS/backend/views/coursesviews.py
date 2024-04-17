@@ -33,7 +33,6 @@ from backend.models.allmodels import (
 from backend.serializers.createcourseserializers import (
     ActivateCourseSerializer,
     CourseSerializer, 
-    CourseStructureSerializer,
     InActivateCourseSerializer, 
     CreateCourseSerializer,
 )
@@ -42,7 +41,10 @@ from backend.serializers.deletecourseserializers import(
     EditCourseInstanceSerializer,
     DeleteSelectedCourseSerializer,
 )
+from backend.serializers.courseserializers import(
+    CourseStructureSerializer,
 
+)
 
 filtered_display = ["active", "inactive", "all"]
 class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):

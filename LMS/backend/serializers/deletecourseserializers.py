@@ -29,3 +29,4 @@ class DeleteSelectedCourseSerializer(serializers.Serializer):
         except Course.DoesNotExist:
             raise serializers.ValidationError("Course not found.")
         return value
+    

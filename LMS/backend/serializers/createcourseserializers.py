@@ -78,7 +78,7 @@ class CourseSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class CourseStructureSerializer(serializers.ModelSerializer):
+class CreateCourseStructureSerializer(serializers.ModelSerializer):
     
     def validate(self, data):
         # Check if course is provided
@@ -95,11 +95,12 @@ class CourseStructureSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Content ID is required")
         order_number = data.get('order_number')
         if order_number is not None and order_number <= 0:
+            print('the error was here5')
             raise serializers.ValidationError("Order number must be a positive integer")
         return data
     class Meta:
         model = CourseStructure
-        fields = '__all__'
+        fields = ['course','order_number','content_type','content_id']
 
 
 class InActivateCourseSerializer(serializers.Serializer):
@@ -144,7 +145,18 @@ class CreateUploadVideoSerializer(serializers.ModelSerializer):
 class CreateQuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
-        fields = ['title', 'random_order', 'answers_at_end', 'exam_paper', 'pass_mark']
+        fields = ['title', 'description', 'answers_at_end', 'exam_paper', 'pass_mark']
+
+    def validate(self, data):
+        """
+        Validate the input data.
+        """
+        pass_mark = data.get('pass_mark')
+        if pass_mark is None:
+            raise serializers.ValidationError("Pass mark is required.")
+        if pass_mark < 0 or pass_mark > 100:
+            raise serializers.ValidationError("Pass mark must be between 0 and 100.")
+        return data
 
 
 class CreateQuestionSerializer(serializers.ModelSerializer):
@@ -169,4 +181,3 @@ class QuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
         fields = '__all__'
-

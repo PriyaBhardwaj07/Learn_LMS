@@ -10,7 +10,6 @@ from .views.superadmindashboardviews import (
 
 from .views.registercourseviews import (
     CourseCustomerRegistrationView,
-
     LMSCustomerListView,
     ManageCourseRegistrationRecordStatusView
 )
