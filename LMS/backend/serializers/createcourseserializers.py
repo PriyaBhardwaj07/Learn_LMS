@@ -12,9 +12,7 @@ class CreateCourseSerializer(serializers.ModelSerializer):
         # Check if title is provided and not empty
         if not title:
             raise serializers.ValidationError("Title is required.")
-        # # Check if summary is provided and not empty
-        # if not summary:
-        #     raise serializers.ValidationError("Summary is required.")
+        
         return data
     class Meta:
         model = Course
@@ -142,6 +140,8 @@ class CreateUploadVideoSerializer(serializers.ModelSerializer):
         fields = ['title', 'video', 'summary']
 
 
+
+
 class CreateQuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
@@ -163,6 +163,12 @@ class CreateQuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Question
         fields = ['figure', 'content', 'explanation', 'choice_order']
+        
+    def validate(self, data):
+        # Check if course is provided
+        if 'content' not in data:
+            raise serializers.ValidationError("content is required")
+        return data
 
 
 class UploadReadingMaterialSerializer(serializers.ModelSerializer):

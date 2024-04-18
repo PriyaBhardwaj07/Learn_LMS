@@ -8,12 +8,6 @@ from backend.models.allmodels import (
     UploadReadingMaterial, 
     UploadVideo
 )
-from backend.models.coremodels import (
-    User,
-    Customer
-)
-
-
 class CourseDisplaySerializer(serializers.ModelSerializer):
     """
     Serializer for Course model.
@@ -148,7 +142,6 @@ class VideoMaterialSerializer(serializers.ModelSerializer):
 
 
 class QuizSerializer(serializers.ModelSerializer):
-    
     def validate(self, data):
         # Field Existence and Null Field Handling
         required_fields = ['id', 'title', 'description']
@@ -162,7 +155,6 @@ class QuizSerializer(serializers.ModelSerializer):
 
 
 class ReadingMaterialListPerCourseSerializer(serializers.ModelSerializer):
-
     uploaded_at = serializers.SerializerMethodField()
     
     def get_uploaded_at(self, obj):
@@ -181,7 +173,6 @@ class ReadingMaterialListPerCourseSerializer(serializers.ModelSerializer):
 
 
 class VideoMaterialListPerCourseSerializer(serializers.ModelSerializer):
-
     uploaded_at = serializers.SerializerMethodField()
     
     def get_uploaded_at(self, obj):
@@ -200,9 +191,8 @@ class VideoMaterialListPerCourseSerializer(serializers.ModelSerializer):
 
 
 class QuizListPerCourseSerializer(serializers.ModelSerializer):
-
     created_at = serializers.SerializerMethodField()
-    
+
     def get_created_at(self, obj):
         return obj.created_at.strftime("%Y-%m-%d")
     
@@ -219,9 +209,7 @@ class QuizListPerCourseSerializer(serializers.ModelSerializer):
 
 
 class QuestionListPerQuizSerializer(serializers.ModelSerializer):
-
     created_at = serializers.SerializerMethodField()
-    
     def get_created_at(self, obj):
         return obj.created_at.strftime("%Y-%m-%d")
     
@@ -237,7 +225,6 @@ class QuestionListPerQuizSerializer(serializers.ModelSerializer):
         fields = ['id', 'content', 'created_at']
 
 class ChoicesListPerQuestionSerializer(serializers.ModelSerializer):
-    
     def validate(self, data):
         # Field Existence and Null Field Handling
         required_fields = ['id', 'choice', 'correct']
@@ -248,3 +235,35 @@ class ChoicesListPerQuestionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Choice
         fields = ['id', 'choice', 'correct']
+
+   
+class EditQuestionInstanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Question
+        fields = ['figure', 'content', 'explanation', 'choice_order']
+
+    def validate(self, data):
+        # Check if content is provided when not null
+        if 'content' in data and not data['content']:
+            raise serializers.ValidationError("Content cannot be empty when provided.")
+
+        return data
+
+class DeleteQuestionSerializer(serializers.Serializer):
+    question_id = serializers.IntegerField(
+        required=True,
+        min_value=1,
+        error_messages={
+            "required": "Question ID is required.",
+            "min_value": "Question ID must be a positive integer."
+        }
+    )
+
+    def validate_question_id(self, value):
+        # Check if the question with the provided ID exists
+        if not Question.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("Question with the provided ID does not exist.")
+        return value
+
+
+    

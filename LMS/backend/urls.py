@@ -23,10 +23,13 @@ from .views.coursecontentviews import (
     CourseStructureView,
     ReadingMaterialView,
     QuizView,
+    EditQuizInstanceOnConfirmationView,
+    NotificationBasedOnCourseDisplayView)
 
-)
+
 from .views.quizcontentviews import (
     ChoicesView,
+    EditingQuestionInstanceOnConfirmationView,
     QuestionView,
     QuizTake,
     dummy_quiz_index,
@@ -37,8 +40,7 @@ from .views.enrollcourseviews import(
     UserListForEnrollmentView,
     ManageCourseEnrollmentView
     )
-
-
+    
 urlpatterns = [
     #courseview.py  views url
     
@@ -65,13 +67,14 @@ urlpatterns = [
     path('course/<int:course_id>/structure/', CourseStructureView.as_view(), name='course-structure'), #*
     path('course/<int:course_id>/reading-material/', ReadingMaterialView.as_view(), name='reading-material'), #*
     path('course/<int:course_id>/quiz/', QuizView.as_view(), name='quiz'), #*
+    path('course/<int:course_id>/notifications/', NotificationBasedOnCourseDisplayView.as_view(), name='course-notifications'),
+    path('course/<int:course_id>/quiz/<int:quiz_id>/edit/', EditQuizInstanceOnConfirmationView.as_view(), name='edit_quiz_instance_confirmation'),
 
     # quizcontentviews.py views urls
-    path('quiz/<int:quiz_id>/question/', QuestionView.as_view(), name='reading-material'), #*
-    path('question/<int:question_id>/choices/', ChoicesView.as_view(), name='question-choice'),
-    path("<int:pk>/<slug:quiz_slug>/take/", QuizTake.as_view(), name="quiz_take"), #href="{% url 'quiz_take' pk=course.pk slug=quiz.slug %}
-    #extra
-    path('quiz/redirect/<int:course_id>/', view=dummy_quiz_index, name='quiz_index'),
+    path('course/<int:course_id>/quiz/<int:quiz_id>/question/', QuestionView.as_view(), name='reading-material'), #10
+    path('question/<int:question_id>/choices/', ChoicesView.as_view(), name='question-choice'),  #11
+    path('<int:pk>/quiz/<slug:quiz_slug>/take/', QuizTake.as_view(), name="quiz_take"), #12      href="{% url 'quiz_take' pk=course.pk slug=quiz.slug %}
+    path('course/<int:course_id>/quiz/<int:quiz_id>/question/', EditingQuestionInstanceOnConfirmationView.as_view(), name='editing-question-instance-on-confirmation'),
 
     
     #enrollcourseviews.py views url
@@ -79,6 +82,6 @@ urlpatterns = [
     path('display/users/', UserListForEnrollmentView.as_view(), name='users-list'), 
     path('course-enrollments/', CourseEnrollmentView.as_view(), name='course-enrollments-record'), 
     path('manage-enrollment/', ManageCourseEnrollmentView.as_view(), name='manage_enrollment'),
-
+    
 
 ]

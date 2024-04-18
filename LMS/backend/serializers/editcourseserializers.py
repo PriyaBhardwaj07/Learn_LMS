@@ -206,3 +206,21 @@ class DeleteQuestionSerializer(serializers.Serializer):
             "min_value": "Question ID must be a positive integer."
         }
     )
+class NotificationSerializer(serializers.ModelSerializer):
+    
+    created_at = serializers.SerializerMethodField()
+    
+    def get_created_at(self, obj):
+        return obj.created_at.strftime("%Y-%m-%d")
+    
+    def validate(self, data):
+        # Field Existence and Null Field Handling
+        required_fields = ['id', 'course', 'message', 'created_at']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise serializers.ValidationError(f"{field} is required")
+        return data
+    
+    class Meta:
+        model = Notification
+        fields = ['id', 'message', 'created_at']

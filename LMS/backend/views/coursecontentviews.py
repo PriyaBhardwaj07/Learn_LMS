@@ -2,9 +2,8 @@ from django.utils import timezone
 from rest_framework import status
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
+from core.custom_permissions import CourseContentPermissions, SuperAdminOrGetOnly, SuperAdminPermission
 from backend.models.coremodels import *
 from backend.serializers.courseserializers import *
 from rest_framework.views import APIView
@@ -24,7 +23,9 @@ from backend.models.allmodels import (
     CourseStructure,
     CourseEnrollment,
     Quiz,
+    Notification
 )
+from backend.serializers.editserializers import EditingQuizInstanceOnConfirmationSerializer
 from backend.serializers.createcourseserializers import (
     CreateCourseStructureSerializer,
     CreateQuizSerializer,
@@ -39,22 +40,23 @@ from backend.serializers.editcourseserializers import (
     DeleteSelectedQuizSerializer,
     EditQuizInstanceSerializer,
     UploadReadingMaterialSerializer,
+    NotificationSerializer
     
     )
+from core.constants import filtered_display_list, manage_course_list
 
-class CourseStructureView(SuperAdminMixin, APIView):
+class CourseStructureView(APIView):
     """
     GET API for all users to list of courses structure for specific course
     
     POST API for super admin to create new instances of course structure while editing existing too
     
     """
-    # permission_classes = [IsAuthenticated]
-    
+    permission_classes = [SuperAdminOrGetOnly]
     def get(self, request, course_id, format=None):
         try:
-            course_structures = CourseStructure.objects.filter(course_id=course_id, active=True, deleted_at__isnull=True)
-            if course_structures.exists():
+            course_structures = CourseStructure.objects.filter(course_id=course_id, deleted_at__isnull=True) # active=True,
+            if course_structures is not None:
                 serializer = CourseStructureSerializer(course_structures, many=True)
                 return Response(serializer.data, status=status.HTTP_200_OK)
             else:
@@ -66,10 +68,6 @@ class CourseStructureView(SuperAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, course_id, *args, **kwargs):
-
-        if not self.has_super_admin_privileges(request):
-            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         course = Course.objects.get(pk=course_id)
         if not course:
             return Response({"error": "Course not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -150,47 +148,20 @@ class CourseStructureView(SuperAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
-class ReadingMaterialView(SuperAdminMixin, ClientAdminMixin, APIView):
+class ReadingMaterialView(APIView):
     """
     GET API for all users to instance of reading material for specific course while list of reading material for specific course for super admin too.
     
     POST API for super admin to create new instances of course structure while editing existing too
     
-    PUT API for super admin to edit the reading material 
-    
-    PATCH API for super admin to delete reading material for a course
-    
     """
-    
+    permission_classes = [CourseContentPermissions]
     def get(self, request, course_id, format=None):
         
         try:
             content_id = request.query_params.get('content_id')
             list_mode = request.query_params.get('list', '').lower() == 'true'  # Check if list mode is enabled
             if content_id:
-                user = request.data.get('user')
-                if not self.has_super_admin_privileges(request):
-                    actively_enrolled = CourseEnrollment.objects.filter(course=course_id, user=user['id'], active=True).exists()
-                    if not actively_enrolled:
-                        if self.has_client_admin_privileges(request):
-                            actively_registered = CourseRegisterRecord.objects.filter(course=course_id, customer=user['customer'], active=True).exists()
-                            if not actively_registered:
-                                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                        else:
-                            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                # user = request.user
-                # if not user:
-                #     return Response({"error": "Request body have no user"}, status=status.HTTP_400_BAD_REQUEST)
-                # if not self.has_super_admin_privileges(request):
-                #     actively_enrolled = CourseEnrollment.objects.filter(course=course_id, user=user.id, active=True).exists()
-                #     if not actively_enrolled:
-                #         if self.has_client_admin_privileges(request):
-                #             actively_registered = CourseRegisterRecord.objects.filter(course=course_id, customer=user.customer.id, active=True).exists()
-                #             if not actively_registered:
-                #                 return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                #         else:
-                #             return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
                 reading_material = UploadReadingMaterial.objects.get(
                     courses__id=course_id, 
                     id=content_id, 
@@ -201,8 +172,6 @@ class ReadingMaterialView(SuperAdminMixin, ClientAdminMixin, APIView):
                     serializer = ReadingMaterialSerializer(reading_material)
                     return Response(serializer.data, status=status.HTTP_200_OK)
             elif list_mode:
-                if not self.has_super_admin_privileges(request):
-                    return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
                 reading_materials = UploadReadingMaterial.objects.filter(
                     courses__id=course_id, 
                     active=True, 
@@ -219,10 +188,6 @@ class ReadingMaterialView(SuperAdminMixin, ClientAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, course_id, *args, **kwargs):
-        
-        if not self.has_super_admin_privileges(request):
-            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        
         course = Course.objects.get(pk=course_id)
         if not course:
             return Response({"error": "Course not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -274,8 +239,6 @@ class ReadingMaterialView(SuperAdminMixin, ClientAdminMixin, APIView):
     
     def put(self, request, course_id, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
             reading_material_id = request.data.get('reading_material_id')
             
@@ -312,8 +275,6 @@ class ReadingMaterialView(SuperAdminMixin, ClientAdminMixin, APIView):
     
     def patch(self, request, course_id, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
             reading_material_id = request.data.get('reading_material_id')
             
@@ -352,39 +313,19 @@ class ReadingMaterialView(SuperAdminMixin, ClientAdminMixin, APIView):
 
             return Response({"error": error_message}, status=status_code)
 
-class QuizView(SuperAdminMixin, ClientAdminMixin, APIView):
+class QuizView(APIView):
     """
         get: to retrieve the quiz of course in url (for authorized all)
         post: to create quiz instances for course in url (for super admin only)
     """
+    permission_classes = [CourseContentPermissions]
+    
     def get(self, request, course_id,format=None):
         try:
             
             content_id = request.query_params.get('content_id')
             list_mode = request.query_params.get('list', '').lower() == 'true'  # Check if list mode is enabled
             if content_id:
-                user = request.data.get('user')
-                if not self.has_super_admin_privileges(request):
-                    actively_enrolled = CourseEnrollment.objects.filter(course=course_id, user=user['id'], active=True).exists()
-                    if not actively_enrolled:
-                        if self.has_client_admin_privileges(request):
-                            actively_registered = CourseRegisterRecord.objects.filter(course=course_id, customer=user['customer'], active=True).exists()
-                            if not actively_registered:
-                                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                        else:
-                            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                # user = request.user
-                # if not user:
-                #     return Response({"error": "Request body have no user"}, status=status.HTTP_400_BAD_REQUEST)
-                # if not self.has_super_admin_privileges(request):
-                #     actively_enrolled = CourseEnrollment.objects.filter(course=course_id, user=user.id, active=True).exists()
-                #     if not actively_enrolled:
-                #         if self.has_client_admin_privileges(request):
-                #             actively_registered = CourseRegisterRecord.objects.filter(course=course_id, customer=user.customer.id, active=True).exists()
-                #             if not actively_registered:
-                #                 return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                #         else:
-                #             return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
                 quiz = Quiz.objects.get(
                     courses__id=course_id, 
                     id=content_id, 
@@ -397,8 +338,6 @@ class QuizView(SuperAdminMixin, ClientAdminMixin, APIView):
                 else:
                     return Response({"error": "No quiz found for the specified ID"}, status=status.HTTP_404_NOT_FOUND)
             elif list_mode:
-                if not self.has_super_admin_privileges(request):
-                    return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
                 quizzes = Quiz.objects.filter(
                     courses__id=course_id, 
                     active=True, 
@@ -415,9 +354,6 @@ class QuizView(SuperAdminMixin, ClientAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, course_id, *args, **kwargs):
-        if not self.has_super_admin_privileges(request):
-            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        
         course = Course.objects.get(pk=course_id)
         if not course:
             return Response({"error": "Course not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -468,8 +404,6 @@ class QuizView(SuperAdminMixin, ClientAdminMixin, APIView):
     
     def put(self, request, course_id, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
             
             # Check if course exists
             course = Course.objects.get(pk=course_id)
@@ -499,9 +433,6 @@ class QuizView(SuperAdminMixin, ClientAdminMixin, APIView):
     
     def patch(self, request, course_id, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             quiz_id = request.data.get('quiz_id', None)
             if not quiz_id:
                 return Response({"error": "Quiz ID is required in the request body."}, status=status.HTTP_400_BAD_REQUEST)
@@ -530,3 +461,97 @@ class QuizView(SuperAdminMixin, ClientAdminMixin, APIView):
             error_message = "Quiz not found" if isinstance(e, ObjectDoesNotExist) else "Internal Server Error"
             status_code = status.HTTP_404_NOT_FOUND if isinstance(e, ObjectDoesNotExist) else status.HTTP_500_INTERNAL_SERVER_ERROR
             return Response({"error": error_message}, status=status_code)
+
+class NotificationBasedOnCourseDisplayView(SuperAdminMixin,ClientAdminMixin,ClientMixin,APIView):
+    # permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_id, format=None):
+        try:
+            # user = request.user
+            user = request.data.get('user')
+            
+            # Fetch notifications for the specified course
+            notifications = Notification.objects.filter(course_id=course_id)
+            
+            if not notifications.exists():
+                return Response({"message": "No notifications found"}, status=status.HTTP_404_NOT_FOUND)
+
+            if self.has_super_admin_privileges(request):
+                print('we are super')
+                serializer = NotificationSerializer(notifications, many=True)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+            if self.has_client_admin_privileges(request):
+                print('we are admin')
+                # course_registration = CourseRegisterRecord.objects.get(user=user.customer, course_id=course_id)
+                course_registration = CourseRegisterRecord.objects.get(customer=user['customer'], course_id=course_id)
+                if not course_registration:
+                    return Response({"message": "No course registration found"}, status=status.HTTP_404_NOT_FOUND)
+                
+                registration_date = course_registration.created_at
+                new_notifications = notifications.filter(created_at__gt=registration_date)
+            
+            elif self.has_client_privileges(request):
+                print('we are client')
+                course_enrollment = CourseEnrollment.objects.get(user=user['id'], course_id=course_id)
+                enrollment_date = course_enrollment.enrolled_at
+                new_notifications = notifications.filter(created_at__gt=enrollment_date)
+            
+            serializer = NotificationSerializer(new_notifications, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except (CourseEnrollment.DoesNotExist, CourseRegisterRecord.DoesNotExist) as e:
+            return Response({"error": "User is not enrolled or registered in this course."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class EditQuizInstanceOnConfirmationView(APIView):
+    permission_classes = [SuperAdminPermission]
+    def put(self, request, course_id, quiz_id, format=None):
+        try:
+            serializer = EditingQuizInstanceOnConfirmationSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            
+            confirmation = serializer.validated_data['confirmation']
+            quiz = Quiz.objects.get(pk=quiz_id)
+            course = quiz.courses.first()  # Assuming each quiz is related to only one course
+            
+            if confirmation:
+                # Editing existing quiz instance
+                if course.active:
+                    return Response({"error": "Editing is not allowed for active courses."},
+                                    status=status.HTTP_403_FORBIDDEN)
+
+                quiz.title = serializer.validated_data.get('title', quiz.title)
+                quiz.description = serializer.validated_data.get('description', quiz.description)
+                quiz.answers_at_end = serializer.validated_data.get('answers_at_end', quiz.answers_at_end)
+                quiz.exam_paper = serializer.validated_data.get('exam_paper', quiz.exam_paper)
+                quiz.pass_mark = serializer.validated_data.get('pass_mark', quiz.pass_mark)
+                quiz.updated_at = timezone.now()
+                quiz.save()
+
+                return Response({"message": "Quiz instance updated successfully."}, status=status.HTTP_200_OK)
+            else:
+                # Creating new quiz instance
+                new_quiz = Quiz.objects.create(
+                    title=serializer.validated_data.get('title'),
+                    description=serializer.validated_data.get('description'),
+                    answers_at_end=serializer.validated_data.get('answers_at_end'),
+                    exam_paper=serializer.validated_data.get('exam_paper'),
+                    pass_mark=serializer.validated_data.get('pass_mark'),
+                )
+
+                # Update CourseStructure entry with the new quiz id
+                CourseStructure.objects.filter(course=course_id, content_type='quiz', content_id=quiz_id) \
+                    .update(content_id=new_quiz.id)
+
+                return Response({"message": "New quiz instance created successfully."}, status=status.HTTP_201_CREATED)
+        
+        except (Quiz.DoesNotExist, Exception) as e:
+            if isinstance(e, Quiz.DoesNotExist):
+                return Response({"error": "Quiz not found"}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+   

@@ -9,7 +9,7 @@ from django.db.models import Q
 from rest_framework import status
 from django.db import transaction
 import pandas as pd # type: ignore
-
+from core.custom_permissions import SuperAdminOrGetOnly, SuperAdminPermission
 from backend.serializers.courseserializers import CourseDisplaySerializer
 from backend.serializers.registercourseserializers import (
     DerivedVersionActiveCourseListSerializer, 
@@ -45,15 +45,19 @@ from backend.serializers.courseserializers import(
     CourseStructureSerializer,
 
 )
+from core.constants import filtered_display_list, manage_course_list
 
-filtered_display = ["active", "inactive", "all"]
-class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
+class CourseView(APIView):
     """
     GET API for super admin to list of courses or single instance based on query parameters passed
     
     POST API for super admin to create new instances of course
+    
+    PUT API for super admin to edit courses
+    
+    PATCH API for super admin to delete courses
     """
-    # permission_classes = [IsAuthenticated]
+    permission_classes = [SuperAdminOrGetOnly]
 
     def get(self, request, *args, **kwargs):
         try:
@@ -73,7 +77,7 @@ class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
             if filtered_display:
-                if filtered_display not in ["active", "inactive", "all"]:
+                if filtered_display not in filtered_display_list : #["active", "inactive", "all"]
                     return Response({"error": "Invalid filtered_display parameter"}, status=status.HTTP_400_BAD_REQUEST)
                 
                 queryset = Course.objects.filter(deleted_at__isnull=True).order_by('-created_at')
@@ -81,14 +85,7 @@ class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
                 if filtered_display == "active":
                     queryset = queryset.filter(active=True)
                 elif filtered_display == "inactive":
-                    if not self.has_super_admin_privileges(request):
-                        return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                    
                     queryset = queryset.filter(active=False)
-                elif filtered_display == "all":
-                    if not self.has_super_admin_privileges(request):
-                        return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-                    
                 course_list = queryset.all()
                 
                 if not course_list.exists():
@@ -103,9 +100,6 @@ class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
 
     def post(self, request, *args, **kwargs):        
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             data = request.data
             if not data:
                 return Response({"error": "Request body is empty"}, status=status.HTTP_400_BAD_REQUEST)
@@ -124,9 +118,6 @@ class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
         
     def put(self, request, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
             course_id = request.data.get('course_id')
             course = Course.objects.get(pk=course_id)
             
@@ -162,15 +153,10 @@ class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
                 error_message = "Invalid data: " + error_message
             return Response({"error": error_message}, status=status.HTTP_400_BAD_REQUEST) 
 
-    """  
-    PATCH : This method soft-deletes a course instance based on the course_id provided in the request body.
-    """
 
     def patch(self, request, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
+           
             serializer = DeleteSelectedCourseSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
@@ -213,8 +199,8 @@ class CourseView(SuperAdminMixin, ClientAdminMixin, ClientMixin, APIView):
                 quiz.questions.all().delete()
             quiz.delete()
         
-manage_status = ["activate", "inactivate","versioning"]
-class ManageCourseView(SuperAdminMixin, APIView):
+
+class ManageCourseView(APIView):
     """
     POST API for super admin to manage the instance of course according to passed parameter.
     
@@ -224,23 +210,22 @@ class ManageCourseView(SuperAdminMixin, APIView):
     
     versioning : to create a new version of existing active course
     """
+    permission_classes = [SuperAdminPermission]
+    
     def post(self, request, *args, **kwargs):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
+            manage = request.data.get('manage')
             
-            manage_status = request.data.get('manage_status')
-            
-            if manage_status not in ["activate", "inactivate","versioning"]:
+            if manage not in manage_course_list:
                 return Response({"error": "Invalid manage_status in request"}, status=status.HTTP_400_BAD_REQUEST)
             course_id = request.data.get('course_id')
             if not course_id:
                 return Response({"error": "Course ID is missing"}, status=status.HTTP_400_BAD_REQUEST)
-            if manage_status == "activate":
+            if manage == "activate":
                 return self.activate_course(course_id)
-            elif manage_status == "inactivate":
+            elif manage == "inactivate":
                 return self.inactivate_course(course_id)
-            elif manage_status == "versioning":
+            elif manage == "versioning":
                 return self.create_course_derived_version(course_id)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -250,6 +235,8 @@ class ManageCourseView(SuperAdminMixin, APIView):
             course = Course.objects.get(pk=course_id, deleted_at__isnull=True)
             if not course:
                 return Response({"error":"no course found"},status=status.HTTP_404_NOT_FOUND)
+            if course.active:
+                return Response({"message": "Course is already active."}, status=status.HTTP_200_OK)
             serializer = ActivateCourseSerializer(data={'course_id': course.id})
             if serializer.is_valid():
                 course = serializer.validated_data['course_id']
@@ -283,11 +270,16 @@ class ManageCourseView(SuperAdminMixin, APIView):
     
     def inactivate_course(self, course_id):
         try:
+            course = Course.objects.get(pk=course_id, deleted_at__isnull=True)
+            if not course:
+                return Response({"error":"no course found"},status=status.HTTP_404_NOT_FOUND)
+            if not course.active:
+                return Response({"message": "Course is already inactive."}, status=status.HTTP_200_OK)
             serializer = InActivateCourseSerializer(data={'course_id': course_id})
             if serializer.is_valid():
                 course = serializer.validated_data['course_id']
                 active_enrollments_count = CourseEnrollment.objects.filter(course=course, active=True, deleted_at__isnull=True).count()
-                if not active_enrollments_count:
+                if active_enrollments_count is None :
                     return Response({"error":"no active course enrollment found"},status=status.HTTP_404_NOT_FOUND)
                 course.active = False
                 course.save()
@@ -366,47 +358,41 @@ class ManageCourseView(SuperAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class FirstVersionActiveCourseListView(SuperAdminMixin, APIView):
+class FirstVersionActiveCourseListView(APIView):
     """
     GET API for super admin to list of courses with original_course == null and version == 1
     """
+    permission_classes = [SuperAdminPermission]
+    
     def get(self, request):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             courses = Course.objects.filter(original_course__isnull=True, version_number=1, active=True).order_by('-updated_at')
             if not courses:
                 return Response({"error": "No active first version courses found."}, status=status.HTTP_404_NOT_FOUND)
             serializer = FirstVersionActiveCourseListSerializer(courses, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except ValidationError as ve:
-            return Response({"error": "Validation Error: " + str(ve)}, status=status.HTTP_400_BAD_REQUEST)
-        except Course.DoesNotExist:
-            return Response({"error": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                if isinstance(e, ValidationError):
+                    return Response({"error": "Validation Error: " + str(e)}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class DerivedVersionActiveCourseListView(SuperAdminMixin, APIView):
+class DerivedVersionActiveCourseListView(APIView):
     """
     GET API for super admin to list of courses with original_course != null and version != 1 for course in url
     """
+    permission_classes = [SuperAdminPermission] 
+    
     def get(self, request, course_id):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             derived_courses = Course.objects.filter(original_course=course_id, active=True).order_by('version_number','-updated_at')
             if not derived_courses:
                 return Response({"error": "No active derived courses found for the provided course ID."}, status=status.HTTP_404_NOT_FOUND)
             serializer = DerivedVersionActiveCourseListSerializer(derived_courses, many=True)
             return Response(serializer.data, status=status.HTTP_200_OK)
-        
-        except ValidationError as ve:
-            return Response({"error": "Validation Error: " + str(ve)}, status=status.HTTP_400_BAD_REQUEST)
-        except Course.DoesNotExist:
-            return Response({"error": "Course not found."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                if isinstance(e, ValidationError):
+                    return Response({"error": "Validation Error: " + str(e)}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,9 +1,11 @@
 import json
-from django.shortcuts import get_object_or_404, render
+from django.utils import timezone
 from rest_framework import status
+from django.core.exceptions import ObjectDoesNotExist
 from django.contrib import messages
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from core.custom_permissions import SuperAdminPermission
 from core.custom_mixins import (
     SuperAdminMixin)
 from rest_framework.exceptions import ValidationError
@@ -21,7 +23,13 @@ from backend.models.allmodels import (
 )
 from backend.serializers.createcourseserializers import (
     CreateChoiceSerializer,
-    QuizSerializer, 
+    CreateQuestionSerializer,
+)
+from django.db import transaction
+from backend.serializers.editserializers import EditingQuestionInstanceOnConfirmationSerializer
+from backend.serializers.courseserializers import (
+    DeleteQuestionSerializer,
+    EditQuestionInstanceSerializer
 )
 import pandas as pd # type: ignore
 from backend.forms import (
@@ -36,24 +44,17 @@ from django.views.generic import (
 from backend.forms import (
     QuestionForm,
 )
-from backend.serializers.courseserializers import(
-    CourseStructureSerializer,
-
-)
-
-
-class QuestionView(SuperAdminMixin, APIView):
+class QuestionView(APIView):
     """
     GET API for super admin to list of questions of specific quiz
     
     POST API for super admin to create new instances of question for the quiz
     
     """
-    def get(self, request, quiz_id, format=None):
+    permission_classes = [SuperAdminPermission]
+    
+    def get(self, request,course_id, quiz_id, format=None):
         try:
-            if not self.has_super_admin_privileges(request) :
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             questions = Question.objects.filter(
                 quizzes__id=quiz_id, 
                 active=True, 
@@ -66,11 +67,8 @@ class QuestionView(SuperAdminMixin, APIView):
                     return Response({"error": "Validation Error: " + str(e)}, status=status.HTTP_400_BAD_REQUEST)
                 else:
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-    def post(self, request, course_id, *args, **kwargs):
-        if not self.has_super_admin_privileges(request) :
-            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        
+
+    def post(self, request, course_id, quiz_id, *args, **kwargs):
         course = Course.objects.get(pk=course_id)
         if not course:
             return Response({"error": "Course not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -80,57 +78,157 @@ class QuestionView(SuperAdminMixin, APIView):
         data = request.data
         if not data:
             return Response({"error": "Request body is empty"}, status=status.HTTP_400_BAD_REQUEST)
+        # Check if the quiz is related to other courses
+        related_courses_count = Quiz.objects.exclude(courses__pk=course_id).filter(pk=quiz_id).count()
+        if related_courses_count is None:
+            return Response({"error": "Quiz not found"}, status=status.HTTP_404_NOT_FOUND)
         try:
-            # Validate and save quiz
-            requested_data = request.data.copy()
-            requested_data['courses'] = [course_id]
-            serializer = QuizSerializer(data=requested_data)
-            if serializer.is_valid():
-                quiz = serializer.save()
-                # If original_course is null, only save quiz
-                if course.original_course is None:
-                    return Response({"message": "Quiz created successfully"}, status=status.HTTP_201_CREATED)
+            
+            if related_courses_count > 0:
+            # Create a new instance of quiz and add the question
+                new_quiz = self.create_new_quiz_instance(course_id, quiz_id, data)
+                if new_quiz is not None:
+                    # Update the quiz_id in the course structure
+                    self.update_course_structure(course_id,quiz_id, new_quiz.id)
+                    return Response({"message": "Question created successfully"}, status=status.HTTP_201_CREATED)
                 else:
-                    # If original_course is not null, also create a CourseStructure entry
-                    try:
-                        last_order_number = CourseStructure.objects.filter(course=course).latest('order_number').order_number
-                    except CourseStructure.DoesNotExist:
-                        last_order_number = 0
-                    # Create new CourseStructure instance
-                    course_structure_data = {
-                        'course': course_id,
-                        'order_number': last_order_number + 1,
-                        'content_type': 'quiz',
-                        'content_id': quiz.pk
-                    }
-                    course_structure_serializer = CourseStructureSerializer(data=course_structure_data)
-                    if course_structure_serializer.is_valid():
-                        course_structure_serializer.save()
-                        return Response({"message": "Quiz created successfully"}, status=status.HTTP_201_CREATED)
-                    else:
-                        return Response({"error": course_structure_serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"error": "Failed to create new quiz instance"}, status=status.HTTP_400_BAD_REQUEST)
             else:
-                return Response({"error": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-                if isinstance(e, ValidationError):
-                    return Response({"error": "Validation Error: " + str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # Add the question to the existing quiz
+                serializer = CreateQuestionSerializer(data=data)
+                if serializer.is_valid():
+                    serializer.save(quizzes=[quiz_id])
+                    return Response({"message": "Question created successfully"}, status=status.HTTP_201_CREATED)
                 else:
-                    return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def create_new_quiz_instance(self, course_id, quiz_id, data):
+        try:
+            with transaction.atomic():
+                # Retrieve the existing quiz
+                existing_quiz = Quiz.objects.get(pk=quiz_id)
+
+                # Create a new instance of quiz with the same data
+                new_quiz = Quiz.objects.create(
+                    title=existing_quiz.title,
+                    description=existing_quiz.description,
+                    answers_at_end=existing_quiz.answers_at_end,
+                    exam_paper=existing_quiz.exam_paper,
+                    single_attempt=existing_quiz.single_attempt,
+                    pass_mark=existing_quiz.pass_mark
+                )
+                new_quiz.courses.set([course_id])
+                
+                related_questions = existing_quiz.questions.all()
+                new_quiz.questions.set(related_questions)
+
+                serializer = CreateQuestionSerializer(data=data)
+                if serializer.is_valid():
+                    serializer.save(quizzes=[new_quiz.pk])
+                    return new_quiz
+                else:
+                    new_quiz.delete()  # Rollback if question creation fails
+                    return None
+        except Quiz.DoesNotExist:
+            return None
+
+    def update_course_structure(self, course_id, old_quiz_id, new_quiz_id):
+        try:
+            # Update CourseStructure entries with the new quiz id
+            CourseStructure.objects.filter(course=course_id ,content_type='quiz',content_id=old_quiz_id ).update(content_id=new_quiz_id)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def put(self, request, course_id, quiz_id, format=None):  
+        error_response = None
+        try:
+            # Extract question_id from request body
+            question_id = request.data.get('question_id')
+            if not question_id:
+                raise ValidationError("Question ID is required in the request body.")
+
+            # Check if quiz exists
+            quiz = Quiz.objects.get(pk=quiz_id)
+
+            # Check if question exists
+            question = Question.objects.get(pk=question_id)
+            if quiz not in question.quizzes.all():
+                raise ValidationError("Question not found for the specified quiz.")
+
+            # Check if course exists
+            course = Course.objects.get(pk=course_id)
+            if course.active:
+                error_response = {"error": "Editing is not allowed for active courses."}
+            elif course not in quiz.courses.all():
+                error_response = {"error": "Quiz not found for the specified course."}
+            else:
+                # Update question instance
+                serializer = EditQuestionInstanceSerializer(question, data=request.data, partial=True)
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except ValidationError as e:
+            error_response = {"error": str(e)}
+        
+        if error_response:
+            return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
+
+        # Handle other unexpected errors
+        return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class ChoicesView(SuperAdminMixin, APIView):
+    def patch(self, request, course_id, quiz_id, format=None):
+        error_response = None
+        try:
+            # Validate request data
+            serializer = DeleteQuestionSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            # Extract validated question_id
+            question_id = serializer.validated_data['question_id']
+            
+            # Fetch the question instance
+            question = Question.objects.get(id=question_id)
+
+            # Check if the question is associated with the specified quiz
+            if quiz_id not in question.quizzes.values_list('id', flat=True):
+                error_response = {"error": "Question not found for the specified quiz."}
+            else:
+                # Check if the question is associated with other quizzes
+                other_quizzes_count = question.quizzes.exclude(id=quiz_id).count()
+                if other_quizzes_count > 0:
+                    # Only remove the relation with the current quiz
+                    question.quizzes.remove(quiz_id)
+                else:
+                    # No other quizzes are associated, soft delete the question
+                    question.deleted_at = timezone.now()
+                    question.active = False
+                    question.save()
+
+                return Response({"message": "Question deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+
+        except ObjectDoesNotExist:
+            error_response = {"error": "Question not found."}
+
+        if error_response:
+            return Response(error_response, status=status.HTTP_404_NOT_FOUND)
+
+        # Handle other unexpected errors
+        return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+class ChoicesView(APIView):
     """
     GET API for super admin to list of choices of specific question
     
     POST API for super admin to create new instances of choice for the question
     
     """
+    permission_classes = [SuperAdminPermission] 
     
     def get(self, request, question_id, format=None):
         try:
-            if not self.has_super_admin_privileges(request) :
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             choices = Choice.objects.filter(
                 question__id=question_id, 
                 active=True, 
@@ -145,9 +243,6 @@ class ChoicesView(SuperAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, question_id, *args, **kwargs):
-        if not self.has_super_admin_privileges(request) :
-            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         question = Question.objects.get(pk=question_id)
         if not question:
             return  Response({"error": "Question not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -161,8 +256,6 @@ class ChoicesView(SuperAdminMixin, APIView):
                     return Response({"error": "Validation Error: " + str(e)}, status=status.HTTP_400_BAD_REQUEST)
                 else:
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 
 # @method_decorator([login_required], name="dispatch")
 class QuizTake(FormView):
@@ -179,12 +272,27 @@ class QuizTake(FormView):
         if quiz_questions_count <= 0:
             messages.warning(request, f"Question set of the quiz is empty. try later!")
             return redirect("course-structure", self.course.id) # redirecting to previous page as this quiz can't be started.
-# send here SingleCourseStructureListDisplayView
         # =================================================================
-        user_header = request.headers.get("user")
-        enrolled_user = get_object_or_404(User, pk=13)
+        # user = request.data.get('user')
+        user = {
+            "id": 11,
+            "first_name": "John",
+            "last_name": "Doe",
+            "role": 1,
+            "email": "john.doe@example.com",
+            "password": "password123",
+            "access_token": "abc123xyz",
+            "status": "active",
+            "created_by_id": 1,
+            "customer": 1,
+            "user_role_id": 2
+        }
+        user_id = user['id']
+        enrolled_user = get_object_or_404(User, pk=user_id)
         # ===============================
         # enrolled_user = request.user
+        # ===============================
+
         self.sitting = QuizAttemptHistory.objects.user_sitting(
             enrolled_user,
             self.quiz, 
@@ -235,10 +343,26 @@ class QuizTake(FormView):
 
     def form_valid_user(self, form):
         # =================================================================
-        user_header = self.request.headers.get("user")
-        enrolled_user = get_object_or_404(User, pk=13)
+        # user = self.request.data.get('user')
+        user = {
+            "id": 11,
+            "first_name": "John",
+            "last_name": "Doe",
+            "role": 1,
+            "email": "john.doe@example.com",
+            "password": "password123",
+            "access_token": "abc123xyz",
+            "status": "active",
+            "created_by_id": 1,
+            "customer": 1,
+            "user_role_id": 2
+        }
+        user_id = user['id']
+        enrolled_user = get_object_or_404(User, pk=user_id)
         # ===============================
         # enrolled_user = request.user
+        # ===============================
+
         progress, _ = Progress.objects.get_or_create(enrolled_user=enrolled_user)
         guess = form.cleaned_data["answers"]
         is_correct = self.question.check_if_correct(guess)
@@ -293,3 +417,36 @@ def dummy_quiz_index(request, course_id):
     course = Course.objects.get(pk=course_id)
     return render(request, 'quiz_index.html', {'course_id': course_id, 'course': course})
 
+class EditingQuestionInstanceOnConfirmationView(APIView):
+    permission_classes = [SuperAdminPermission]
+    def put(self, request, course_id, quiz_id, format=None):
+        try:
+            serializer = EditingQuestionInstanceOnConfirmationSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            
+            confirmation = serializer.validated_data['confirmation']
+            quiz = Quiz.objects.get(pk=quiz_id)
+            questions = quiz.questions.all()
+            
+            if confirmation:
+                # Editing existing question instances
+                for question in questions:
+                    question.figure = serializer.validated_data.get('figure', question.figure)
+                    if 'content' in serializer.validated_data and serializer.validated_data['content'] is not None:
+                        question.content = serializer.validated_data['content']
+                    question.explanation = serializer.validated_data.get('explanation', question.explanation)
+                    question.choice_order = serializer.validated_data.get('choice_order', question.choice_order)
+                    question.updated_at = timezone.now()
+                    question.save()
+                
+                return Response({"message": "Question instances updated successfully."}, status=status.HTTP_200_OK)
+            else:
+                # Do not allow updating, suggest creating a new question
+                return Response({"message": "You chose not to update existing questions. Please create new ones instead."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        
+        except (Quiz.DoesNotExist, Exception) as e:
+            if isinstance(e, Quiz.DoesNotExist):
+                return Response({"error": "Quiz not found"}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

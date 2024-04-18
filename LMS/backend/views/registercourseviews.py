@@ -4,7 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.exceptions import NotFound, ValidationError
 from django.utils import timezone
-from core.custom_mixins import SuperAdminMixin
+from core.custom_permissions import SuperAdminPermission
 from backend.models.coremodels import *
 from backend.serializers.registercourseserializers import *
 from backend.models.allmodels import (
@@ -12,16 +12,17 @@ from backend.models.allmodels import (
     CourseRegisterRecord,
     CourseEnrollment,
 )
+from core.constants import filtered_display_list, manage_status_list
 
-class LMSCustomerListView(SuperAdminMixin, APIView):
+
+class LMSCustomerListView(APIView):
     """
     GET API for super admin to list of customers who have resource privilege of LMS and are active
     """
+    permission_classes = [SuperAdminPermission]
+    
     def get(self, request, format=None):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             customer_ids_with_lms = CustomerResources.objects.filter(resource__resource_name='LMS').values_list('customer_id', flat=True)
             
             if not customer_ids_with_lms:
@@ -42,8 +43,7 @@ class LMSCustomerListView(SuperAdminMixin, APIView):
                 return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-filtered_display = ["active", "inactive", "all"]
-class CourseCustomerRegistrationView(SuperAdminMixin, APIView):
+class CourseCustomerRegistrationView(APIView):
     """
     GET API for super admin to list of registration records or single instance based on query parameters passed
     
@@ -51,15 +51,13 @@ class CourseCustomerRegistrationView(SuperAdminMixin, APIView):
     
     PUT API for super admin to delete selected instances of registration records
 
-    """
+    """ 
+    permission_classes = [SuperAdminPermission]
     
     def get(self, request, *args, **kwargs):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             filtered_display = self.request.query_params.get('filtered_display')
-            if filtered_display not in ["active", "inactive", "all"]:
+            if filtered_display not in filtered_display_list:
                 return Response({"error": "Invalid filtered_display parameter"}, status=status.HTTP_400_BAD_REQUEST)
             
             queryset = CourseRegisterRecord.objects.filter(deleted_at__isnull=True).order_by('-created_at')
@@ -81,9 +79,6 @@ class CourseCustomerRegistrationView(SuperAdminMixin, APIView):
                     return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, *args, **kwargs):
-        if not self.has_super_admin_privileges(request):
-            return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-        
         course_ids = request.data.get("course_id", [])
         customer_ids = request.data.get("customer_id", [])
         
@@ -99,11 +94,11 @@ class CourseCustomerRegistrationView(SuperAdminMixin, APIView):
             for course_id in course_ids:
                 course = Course.objects.get(pk=course_id)
                 
-                if not course.exists():
+                if not course:
                     return Response({"message": "No course found.", "data": []}, status=status.HTTP_404_NOT_FOUND)
                 for customer_id in customer_ids:
                     customer = Customer.objects.get(pk=customer_id)
-                    if not customer.exists():
+                    if not customer:
                         return Response({"message": "No customer found.", "data": []}, status=status.HTTP_404_NOT_FOUND)
                     # Check if record already exists
                     if CourseRegisterRecord.objects.filter(course=course_id, customer=customer_id, deleted_at__isnull=True ).exists():
@@ -154,9 +149,6 @@ class CourseCustomerRegistrationView(SuperAdminMixin, APIView):
 
     def put(self, request):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             pk = request.data.get('pk')
             registered_record = CourseRegisterRecord.objects.get(pk=pk)
             
@@ -184,18 +176,17 @@ class CourseCustomerRegistrationView(SuperAdminMixin, APIView):
                 return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-manage_status = ["activate","inactivate"]
-class ManageCourseRegistrationRecordStatusView(SuperAdminMixin, APIView):
+
+class ManageCourseRegistrationRecordStatusView(APIView):
     """
     POST API for super admin to manage the instance of course registration record according to passed parameter.
     """
+    permission_classes = [SuperAdminPermission]
+    
     def post(self, request, *args, **kwargs):
         try:
-            if not self.has_super_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             manage_status = self.request.query_params.get('manage_status')
-            if manage_status not in ["activate", "inactivate"]:
+            if manage_status not in manage_status_list:
                 return Response({"error": "Invalid manage_status parameter"}, status=status.HTTP_400_BAD_REQUEST)
             record_ids = request.data.get("records", [])
             if not record_ids:
@@ -209,13 +200,13 @@ class ManageCourseRegistrationRecordStatusView(SuperAdminMixin, APIView):
                 if not record:
                     return Response({"error": f"Record with ID {record_id} not found"}, status=status.HTTP_404_NOT_FOUND)
                 if manage_status == "activate":
-                    if not record.active and record.deleted_at is not None:
+                    if not record.active and record.deleted_at is None:
                         record.active = True
                         record.updated_at = timezone.now()
                         record.save()
                         activated_records.append(record_id)
                 elif manage_status == "inactivate":
-                    if record.active and record.deleted_at is not None:
+                    if record.active and record.deleted_at is None:
                         record.active = False
                         record.updated_at = timezone.now()
                         record.save()

@@ -1,46 +1,24 @@
 from datetime import timezone
-import json
 from django.forms import ValidationError
 from django.utils import timezone
 from django.shortcuts import get_object_or_404, render
 from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import status
-from django.contrib import messages
 from django.db import transaction
 from django.db import DatabaseError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import generics
+from core.custom_permissions import ClientAdminPermission, ClientPermission, IsClientOrAdmin
 from backend.models.coremodels import User
-from core.custom_mixins import (
-    ClientAdminMixin,
-    ClientMixin,
-    SuperAdminMixin
-)
 from backend.models.allmodels import (
     Course,
     CourseRegisterRecord,
-    CourseEnrollment,
-    Progress,
-    Quiz,
-    Question,
-    QuizAttemptHistory
+    CourseEnrollment
 )
-from django.views.generic import (
-    DetailView,
-    ListView,
-    TemplateView,
-    FormView,
-    CreateView,
-    FormView,
-    UpdateView,
-)
-
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import get_object_or_404, render, redirect
 from django.utils.decorators import method_decorator
-
 from  backend.serializers.enrollcourseserializers import (
     CourseEnrollmentSerializer,
     DisplayCourseEnrollmentSerializer,
@@ -52,29 +30,29 @@ from  backend.serializers.enrollcourseserializers import (
 )
 from backend.models import *
 
-class DisplayCourseListView(APIView, ClientAdminMixin, ClientMixin):
+class DisplayCourseListView(APIView):
     """
-    GET REQUEST: - client admin : display courses enrolled 
-                 - client :display list of courses that client have been  enrolled in to
+    GET REQUEST: - client admin: display courses enrolled
+                 - client: display list of courses that client has been enrolled in
     """
+    permission_classes = [IsClientOrAdmin]
+
     def get(self, request, format=None):
         try:
-            if request.user.is_superuser:
-                return Response({"error": "Superusers are not allowed to access this endpoint."}, status=status.HTTP_403_FORBIDDEN)
-
-            # Check if the user is a client admin
-            if self.has_client_admin_privileges(request):
-                # Extract customer ID from the request body
+            if request.data.get("customer_id"):
+                # Check if the user is a client admin
                 customer_id = request.data.get("customer_id")
                 if not customer_id:
-                    return Response({"error": "Customer ID is required in the request body."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"error": "Customer ID is required in the request body."},
+                                    status=status.HTTP_400_BAD_REQUEST)
 
                 # Filter CourseRegisterRecord with customer ID and active status
                 course_register_records = CourseRegisterRecord.objects.filter(customer=customer_id, active=True)
 
                 # Check if courses exist
                 if not course_register_records:
-                    return Response({"message": "No customer-course register record found.", "data": []}, status=status.HTTP_404_NOT_FOUND)
+                    return Response({"message": "No customer-course register record found.", "data": []},
+                                    status=status.HTTP_404_NOT_FOUND)
 
                 # Get the list of course IDs
                 course_ids = [record.course.id for record in course_register_records]
@@ -86,12 +64,12 @@ class DisplayCourseListView(APIView, ClientAdminMixin, ClientMixin):
                 serializer = RegisteredCourseSerializer(courses, many=True)
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
-            # If the user is a client
-            elif self.has_client_privileges(request):
-                # For clients, ensure that the user ID is present
+            elif request.data.get("user_id"):
+                # Check if the user is a client
                 user_id = request.data.get("user_id")
                 if not user_id:
-                    return Response({"error": "User ID is required in the request body."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({"error": "User ID is required in the request body."},
+                                    status=status.HTTP_400_BAD_REQUEST)
 
                 # Retrieve enrolled courses for the user that are active
                 enrolled_courses = CourseEnrollment.objects.filter(user=user_id, active=True)
@@ -102,22 +80,19 @@ class DisplayCourseListView(APIView, ClientAdminMixin, ClientMixin):
 
             else:
                 return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class UserListForEnrollmentView(APIView, ClientAdminMixin):
+        
+        
+class UserListForEnrollmentView(APIView):
     """
     GET REQUEST 
     view to display data about list of user which have customer id same as that of user in request.            
     """
+    permission_classes = [ClientAdminPermission]
     
     def get(self, request, format=None):
         try:
-            # Check if the user has client admin privileges
-            if not self.has_client_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-            
             # Extract customer ID from the request body
             customer_id = request.data.get("customer_id")
             if not customer_id:
@@ -135,12 +110,13 @@ class UserListForEnrollmentView(APIView, ClientAdminMixin):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class CourseEnrollmentView(APIView, ClientAdminMixin):
+class CourseEnrollmentView(APIView):
     '''
     GET - display list of course enrollments
     POST - enrolling user for courses
     PATCH - delete enrollment
     '''
+    permission_classes = [ClientAdminPermission]
     
     def get(self, request, format=None):
         try:
@@ -151,10 +127,6 @@ class CourseEnrollmentView(APIView, ClientAdminMixin):
 
             # Extract the role from the user data
             role = user_data.get("role")
-
-            # Check if the user has client admin privileges
-            if not self.has_client_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
             # Get all instances of CourseEnrollment
             enrollments = CourseEnrollment.objects.all()
@@ -175,9 +147,6 @@ class CourseEnrollmentView(APIView, ClientAdminMixin):
     
     def post(self, request, *args, **kwargs):
         try:
-            # Check if the user has client admin privileges
-            if not self.has_client_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
 
             # Validate request data using the serializer
             serializer = CourseEnrollmentSerializer(data=request.data)
@@ -243,10 +212,6 @@ class CourseEnrollmentView(APIView, ClientAdminMixin):
             enrollment_id = request.data.get('enrollment_id')
             if not enrollment_id:
                 return Response({"error": "Enrollment ID is required in the request body."}, status=status.HTTP_400_BAD_REQUEST)
-
-            # Check if the user has client admin privileges
-            if not self.has_client_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
             
             # Check if the enrollment exists
             enrollment = CourseEnrollment.objects.get(pk=enrollment_id)
@@ -267,18 +232,15 @@ class CourseEnrollmentView(APIView, ClientAdminMixin):
                 return Response({"error": f"Course enrollment with ID {enrollment_id} not found."}, status=status.HTTP_404_NOT_FOUND)
             else:
                 return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-class ManageCourseEnrollmentView(APIView, ClientAdminMixin):
+            
+class ManageCourseEnrollmentView(APIView):
     """
     This API is used to manage course enrollment for specified user(s).
     Method: POST
     """
+    permission_classes = [ClientAdminPermission]
     def post(self, request, *args, **kwargs):
         try:
-            # Check if the user has client admin privileges
-            if not self.has_client_admin_privileges(request):
-                return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
-
             # Extract the 'action' parameter from the query parameters
             action = request.query_params.get('action')
 
