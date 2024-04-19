@@ -154,6 +154,10 @@ class ReadingMaterialView(APIView):
     
     POST API for super admin to create new instances of course structure while editing existing too
     
+    PUT API for super admin to edit reading material 
+    
+    PATCH API for super admin to delete reading material 
+    
     """
     permission_classes = [CourseContentPermissions]
     def get(self, request, course_id, format=None):
@@ -317,6 +321,8 @@ class QuizView(APIView):
     """
         get: to retrieve the quiz of course in url (for authorized all)
         post: to create quiz instances for course in url (for super admin only)
+        put : to edit quiz 
+        patch : to delete a quiz 
     """
     permission_classes = [CourseContentPermissions]
     
@@ -463,6 +469,10 @@ class QuizView(APIView):
             return Response({"error": error_message}, status=status_code)
 
 class NotificationBasedOnCourseDisplayView(SuperAdminMixin,ClientAdminMixin,ClientMixin,APIView):
+    
+    """  
+    GET API : for all to get notification related to any update i courses
+    """
     # permission_classes = [IsAuthenticated]
 
     def get(self, request, course_id, format=None):
@@ -477,22 +487,12 @@ class NotificationBasedOnCourseDisplayView(SuperAdminMixin,ClientAdminMixin,Clie
                 return Response({"message": "No notifications found"}, status=status.HTTP_404_NOT_FOUND)
 
             if self.has_super_admin_privileges(request):
-                print('we are super')
+              #  print('we are super')
                 serializer = NotificationSerializer(notifications, many=True)
                 return Response(serializer.data, status=status.HTTP_200_OK)
 
             if self.has_client_admin_privileges(request):
-                print('we are admin')
-                # course_registration = CourseRegisterRecord.objects.get(user=user.customer, course_id=course_id)
-                course_registration = CourseRegisterRecord.objects.get(customer=user['customer'], course_id=course_id)
-                if not course_registration:
-                    return Response({"message": "No course registration found"}, status=status.HTTP_404_NOT_FOUND)
-                
-                registration_date = course_registration.created_at
-                new_notifications = notifications.filter(created_at__gt=registration_date)
-            
-            elif self.has_client_privileges(request):
-                print('we are client')
+               #  print('we are client')
                 course_enrollment = CourseEnrollment.objects.get(user=user['id'], course_id=course_id)
                 enrollment_date = course_enrollment.enrolled_at
                 new_notifications = notifications.filter(created_at__gt=enrollment_date)
@@ -507,6 +507,9 @@ class NotificationBasedOnCourseDisplayView(SuperAdminMixin,ClientAdminMixin,Clie
 
 
 class EditQuizInstanceOnConfirmationView(APIView):
+    """ 
+    PUT API : for super admin to edit quiz if confirmation is true if not then new quiz is created
+    """
     permission_classes = [SuperAdminPermission]
     def put(self, request, course_id, quiz_id, format=None):
         try:

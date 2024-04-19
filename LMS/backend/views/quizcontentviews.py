@@ -50,6 +50,10 @@ class QuestionView(APIView):
     
     POST API for super admin to create new instances of question for the quiz
     
+    PUT API for super admin to edit question of a quiz
+    
+    PATCH API for super admin to delete question of a quiz
+    
     """
     permission_classes = [SuperAdminPermission]
     
@@ -418,6 +422,11 @@ def dummy_quiz_index(request, course_id):
     return render(request, 'quiz_index.html', {'course_id': course_id, 'course': course})
 
 class EditingQuestionInstanceOnConfirmationView(APIView):
+    
+    """ 
+    PUT API : for editing question if the confirmation is true then editing allowed
+    
+    """
     permission_classes = [SuperAdminPermission]
     def put(self, request, course_id, quiz_id, format=None):
         try:
