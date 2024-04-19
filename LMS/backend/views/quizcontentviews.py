@@ -222,6 +222,7 @@ class QuestionView(APIView):
 
         # Handle other unexpected errors
         return Response({"error": "An unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
 class ChoicesView(APIView):
     """
     GET API for super admin to list of choices of specific question

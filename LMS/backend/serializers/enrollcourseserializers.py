@@ -2,7 +2,6 @@ from datetime import timezone
 from rest_framework import serializers
 from backend.models.allmodels import Course, CourseEnrollment
 from backend.models.coremodels import User
-from django.core.exceptions import ObjectDoesNotExist
 
 class RegisteredCourseSerializer(serializers.ModelSerializer):
     

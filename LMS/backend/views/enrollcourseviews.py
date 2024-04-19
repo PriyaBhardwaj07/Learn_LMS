@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import generics
-from core.custom_permissions import ClientAdminPermission, ClientPermission, IsClientOrAdmin
+from core.custom_permissions import ClientAdminPermission,IsClientOrAdmin
 from backend.models.coremodels import User
 from backend.models.allmodels import (
     Course,
@@ -77,12 +77,10 @@ class DisplayCourseListView(APIView):
                 # Serialize the enrolled courses data
                 serializer = EnrolledCoursesSerializer(enrolled_courses, many=True)
                 return Response(serializer.data, status=status.HTTP_200_OK)
-
             else:
                 return Response({"error": "Permission denied"}, status=status.HTTP_403_FORBIDDEN)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
         
 class UserListForEnrollmentView(APIView):
     """
@@ -208,10 +206,12 @@ class CourseEnrollmentView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def patch(self, request, format=None):
+        # Initialize serializer with request data
+        serializer = EnrollmentDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)  # Raise validation error if invalid
+
         try:
-            enrollment_id = request.data.get('enrollment_id')
-            if not enrollment_id:
-                return Response({"error": "Enrollment ID is required in the request body."}, status=status.HTTP_400_BAD_REQUEST)
+            enrollment_id = serializer.validated_data['enrollment_id']
             
             # Check if the enrollment exists
             enrollment = CourseEnrollment.objects.get(pk=enrollment_id)

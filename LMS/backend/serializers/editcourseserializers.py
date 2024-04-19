@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from backend.models.allmodels import Choice, Course, CourseStructure, Notification, Question, UploadReadingMaterial, UploadVideo, Quiz
+from backend.models.allmodels import (Course, Notification, Question, UploadReadingMaterial, Quiz)
 
 class EditCourseInstanceSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=100, required=True)
@@ -165,8 +165,6 @@ class EditQuizInstanceSerializer(serializers.ModelSerializer):
             pass_mark = data['pass_mark']
             if pass_mark < 0 or pass_mark > 100:
                 raise serializers.ValidationError("Pass mark should be between 0 and 100.")
-
-        # Your custom validations here
         return data
     
 class DeleteSelectedQuizSerializer(serializers.Serializer):
@@ -206,6 +204,13 @@ class DeleteQuestionSerializer(serializers.Serializer):
             "min_value": "Question ID must be a positive integer."
         }
     )
+
+    def validate_question_id(self, value):
+        # Check if the question with the provided ID exists
+        if not Question.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("Question with the provided ID does not exist.")
+        return value
+    
 class NotificationSerializer(serializers.ModelSerializer):
     
     created_at = serializers.SerializerMethodField()
